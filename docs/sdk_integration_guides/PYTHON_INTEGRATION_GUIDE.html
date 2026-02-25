@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Integración VeriFactu para Python</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #2980b9;
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        h3 {
+            color: #16a085;
+            margin-top: 25px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        ul,
+        ol {
+            margin-bottom: 15px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        code {
+            font-family: Consolas, "Courier New", monospace;
+            background-color: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #c7254e;
+        }
+
+        pre {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 0;
+            padding: 10px 20px;
+            background-color: #eef9fd;
+            color: #555;
+        }
+
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 10px 20px;
+            margin-bottom: 15px;
+        }
+
+        hr {
+            border: 0;
+            height: 1px;
+            background: #ddd;
+            margin: 40px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Guía de Integración VeriFactu para Python</h1>
+    <blockquote>
+        <p><strong>Resumen</strong>: Esta guía documenta la integración técnica del adaptador "Micro Server" en entornos
+            Python (Odoo, Django, Flask, o scripts autónomos). Utiliza exclusivamente la librería estándar
+            <code>requests</code>, delegando todo el peso criptográfico e interactuando como un cliente ligero
+            Multi-Tenant.</p>
+    </blockquote>
+    <hr />
+    <h2>1. Arquitectura del Motor (Engine Python)</h2>
+    <p>La integración se basa en la plantilla provista <code>verifactu_cli.py</code>. Encapsula toda la comunicación
+        usando la versátil y extendida librería HTTP <code>requests</code>.</p>
+    <h3>1.1. Inyección Dinámica del Emisor (Multi-Tenant Seguro)</h3>
+    <p>La clase <code>VFEngine</code> contiene un orquestador que "huele" el contenido del diccionario JSON y extrae el
+        titular, para inyectarlo en las defensas HTTP del Micro Server:</p>
+    <pre><code class="language-python">def set_emisor_header(self, nif):
+    if nif:
+        self.nif_emisor = nif
+        self.headers["X-Verifactu-Emisor"] = nif
+</code></pre>
+    <p>De esta manera, en sistemas con decenas o cientos de empresas (como ecosistemas Odoo Multi-Compañía), no importa
+        cuántos envíos simultáneos realice en distintos hilos; cada petición a <code>/v1/ingesta</code> o
+        <code>/v1/check_status</code> portará obligatoriamente el NIF encriptado junto al Token.</p>
+    <hr />
+    <h2>2. Flujo de Trabajo en Tiempo Real (Alta de Factura)</h2>
+    <h3>Paso 1: Ingesta Asíncrona</h3>
+    <p>El pase del objeto al motor se realiza transmitiéndole el Diccionario (JSON mapeado):</p>
+    <pre><code class="language-python"># Al llamar, el motor detecta el NIF e inyecta la cabecera sola.
+res = self.engine.ingesta_json(factura)
+if res.get("status") in ["ok", "true"]:
+    print("Ingestada. ID de Tracking:", res.get("id"))
+</code></pre>
+
+    <h3>Paso 2: Espera Cíclica (Polling con Timeout)</h3>
+    <p>Inmediatamente después del envío, los procesos en Python pueden interrogar la cola del servidor cada segundo
+        mientras el sistema maestro de la AEAT genera las réplicas documentales.</p>
+    <pre><code class="language-python">print("Esperando respuesta de la AEAT (Polling)...")
+for _ in range(15): # Límite de 15 segundos tolerante a bloqueos de red
+    time.sleep(1)
+    st = self.engine.check_status(nif_emisor, serie, numero)
+    status_txt = str(st.get("status", "")).lower()
+
+    if status_txt and status_txt not in ["pending", "en cola", "unknown", "error"]:
+        print("✅ Respuesta recibida!")
+        
+        # Extracción segura de datos que pueden estar en Timeline o Pendientes:
+        det = st.get("detalles_aeat", {})
+        csv_val = st.get("csv") or det.get("cab_csv_verifactu", "N/A")
+        huella = det.get("huella", "N/A")
+        qr = det.get("cab_url_qr") or det.get("url_qr_verifactu", "N/A")
+        
+        print(f"CSV: {csv_val} | QR URI: {qr}")
+        break
+else:
+    print("⏳ Timeout esperando a la AEAT.")
+</code></pre>
+    <hr />
+    <h2>3. Configuración del Archivo <code>Config.json</code></h2>
+    <p>La consola busca un <code>Config.json</code> físico adjunto en donde basta con rellenar <code>base_url</code> y
+        <code>token</code>, el cual se inyectará como <code>X-API-Key</code>. Las claves de <code>"demo"</code> pueden
+        quedar vacías, ya que la aplicación se "Auto-Configura" absorbiendo <code>cabecera.emisor</code> de la plantilla
+        generadora.</p>
+
+    <pre><code class="language-json">{
+  "api": {
+    "base_url": "http://localhost:8000",
+    "timeout_sec": 60,
+    "token": "tu_token_api_aqui",
+    "ssl_verify": false
+  },
+  "demo": {
+    "nif_emisor": "",
+    "serie": "",
+    "num_inicio": ""
+  }
+}
+</code></pre>
+    <hr />
+    <h2>4. Lotes de Auto-Incrementación</h2>
+    <p>El código de demo incluye rutinas clásicas para testear la carga masiva en Python. Son capaces de coger el
+        inicial (ej. 100) y disparar bucles subiendo el numerador internamente de uno en uno, modificando la clave de
+        nivel profundo del JSON en memoria y guardándolo actualizado a disco como plantilla segura.</p>
+    <h3>Recomendación para Crons / Procesamiento Batch</h3>
+    <p>En caso de programar integraciones (<code>cron</code>) en Python que engloben cientos de envíos enlatados,
+        sugerimos utilizar <code>time.sleep(0.2)</code> entre las ejecuciones HTTP para garantizar un respiro a la capa
+        asíncrona y consolidar la transacción a base de datos de manera atómica de cara al usuario final.</p>
+    <hr />
+    <h2>5. Extracción de URLs (QR) visual</h2>
+    <p>En la rutina asíncrona (Polling) o bien consultando el menú de *Pendientes*, los campos que devuelve el endpoint
+        y que usted debe pasar al TPV / Impresora / HTML Final en Python son:</p>
+    <ul>
+        <li><code>url_qr_verifactu</code> / <code>cab_url_qr</code>: Cadena hipervínculo que debe estamparse convertida
+            en un código QR sobre el papel mediante librerías visuales como <code>qrcode</code> o
+            <code>reportlab</code>.</li>
+        <li><code>csv</code>: Cadena alfanumérica criptográfica pura. Se estampa en claro para facilitar su validación
+            manual mediante la sede web.</li>
+    </ul>
+    <hr />
+    <h2>6. Solución de Problemas (Troubleshooting)</h2>
+    <h3>Excepción SSL</h3>
+    <ul>
+        <li><strong>Causa</strong>: Entorno de desarrollo local, carencia del Root CA Trust o IP local compartida.</li>
+        <li><strong>Solución</strong>: Parsee <code>ssl_verify = False</code> y entrégueselo a los métodos del módulo
+            <code>requests</code> mediante el kwarg <code>verify=self.ssl_verify</code> en entornos Sandbox.</li>
+    </ul>
+
+    <h3>Lista Exhaustiva Tipología de Estructura de Listas (List/Dict Error)</h3>
+    <ul>
+        <li><strong>Causa</strong>: Peticiones a <code>pendientes</code> devuelven ocasionalmente un
+            <code>JSON Array</code> directo en vez de un <code>JSON Object</code> si interceptan eventos de sistema
+            ajenos al Timeline.</li>
+        <li><strong>Solución</strong>: Valide preventinamente <code>isinstance(res, dict)</code> antes de solicitar
+            llaves del nivel cero, tal y como muestra el código actualizado en la versión robusta.</li>
+    </ul>
+
+</body>
+
+</html>

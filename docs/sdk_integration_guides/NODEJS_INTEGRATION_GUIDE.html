@@ -1,0 +1,206 @@
+<meta charset="UTF-8">
+<style>body{font-family:sans-serif;line-height:1.6;padding:20px;max-width:900px;margin:auto;}code{background:#f4f4f4;padding:2px 5px;}pre{background:#f4f4f4;padding:10px;border-radius:5px;}blockquote{border-left:5px solid #ccc;margin-left:0;padding-left:10px;}</style>
+<h1>Guía de Integración VeriFactu para Node.js</h1>
+<blockquote>
+<p><strong>Resumen</strong>: Esta guía documenta la integración técnica del adaptador "Micro Server" en entornos Node.js. Permite delegar la complejidad criptográfica y de comunicación con la AEAT a un backend intermedio, diseñado para cumplir con la normativa VeriFactu de forma robusta y sencilla.</p>
+</blockquote>
+<hr />
+<h2>1. Arquitectura del Motor (Engine Node.js)</h2>
+<p>La integración se basa en peticiones HTTP estándar (REST) al Micro Server. Puede utilizar cualquier librería cliente HTTP como <code>axios</code>, <code>node-fetch</code> o el módulo nativo <code>http/https</code>.</p>
+<h3>1.1. Responsabilidad Criptográfica (Certificados AEAT vs HTTPS)</h3>
+<p>Es de vital importancia distinguir entre los certificados de la AEAT y la comunicación con el servidor:</p>
+<ul>
+<li><strong>Firma de Facturas (Certificados AEAT)</strong>: Usted <strong>NO tiene ninguna responsabilidad</strong> ni debe realizar ninguna implementación en Node.js. El Micro Server custodia los certificados fiscales de forma segura y se encarga de firmar los XML, encriptarlos y negociar la conexión segura MTLS directamente con Hacienda. Toda esta complejidad es 100% transparente para su aplicación.</li>
+<li><strong>Comunicación Segura (HTTPS Interno)</strong>: La infraestructura entre su Node.js y el Micro Server interno solo requerirá configuración SSL si su propio sistema interno lo exige o si el Micro Server está montado detrás de un dominio con protocolo HTTPS.</li>
+</ul>
+<h3>Componentes Principales</h3>
+<p>Para simplificar, recomendamos una estructura similar a la Demo:</p>
+<ol>
+<li><strong><code>Proxy / Cliente HTTP</code></strong><ul>
+<li>Su aplicación Node.js actúa como intermediario o cliente directo del Micro Server.</li>
+<li><strong>Endpoint Ingesta</strong>: <code>POST /v1/ingesta</code></li>
+<li><strong>Endpoint Polling</strong>: <code>GET /verifactu/pendientes</code></li>
+<li><strong>Endpoint ACK</strong>: <code>POST /verifactu/ack</code></li>
+<li><strong>Endpoint Status</strong>: <code>GET /v1/check_status</code></li>
+</ul>
+</li>
+</ol>
+<p><strong>Orquestación</strong>: Maneja la <strong>Máquina de Estados</strong> implícita de la normativa:
+1.  <strong>INGESTA</strong>: Envío del JSON al Backend.
+2.  <strong>POLLING</strong>: Consulta de la cola de "Pendientes" (facturas ya procesadas por el worker y enviadas a la AEAT) esperando la confirmación (ACK).
+3.  <strong>ACK</strong>: Confirmación de recepción (borrado de la cola) tras guardar Huella y QR.</p>
+<hr />
+<h2>2. Configuración del JSON (Altas, Subsanaciones y Anulaciones)</h2>
+<p>No encontrará en esta guía una documentación exhaustiva sobre cómo construir el JSON campo a campo. <strong>¡No es necesario!</strong></p>
+<p>El <strong>Panel de Administración Web</strong> del Micro Server (sección <strong>Envíos</strong>) incluye una herramienta de <strong>Generación de Payloads</strong> interactiva diseñada específicamente para desarrolladores.</p>
+<blockquote>
+<p><strong>Nota sobre <code>metadata</code></strong>: El esquema JSON exige un bloque <code>metadata</code> en la raíz. Aunque actualmente su contenido es ignorado, <strong>debe estar presente</strong> para pasar la validación del esquema.</p>
+</blockquote>
+<hr />
+<h2>3. Flujo de Trabajo Típico: "Alta de Factura"</h2>
+<p>El Backend actúa como un <strong>buffer inteligente</strong>. Su aplicación Node.js no habla con la AEAT directamente; habla con este Micro Server.</p>
+<h3>Paso 1: Ingesta (<code>/v1/ingesta</code>)</h3>
+<p>Su aplicación genera el objeto JSON con los datos de la factura y lo envía.</p>
+<ul>
+<li><strong>Respuesta Inmediata</strong>: El Backend valida la estructura básica y guarda la factura. Retorna <code>200 OK</code>.</li>
+<li><strong>Estado</strong>: La factura <strong>AÚN NO</strong> ha ido a la AEAT. Un "Worker" en segundo plano la tomará, firmará, encadenará y enviará.</li>
+</ul>
+<pre><code class="language-javascript">const axios = require('axios');
+
+async function ingesta(facturaJson) {
+    const url = 'http://localhost:8000/v1/ingesta';
+    try {
+        const res = await axios.post(url, facturaJson, {
+            headers: {
+                'X-API-Key': process.env.VERIFACTU_API_KEY,
+                'X-Verifactu-Emisor': facturaJson.cabecera.emisor
+            }
+        });
+        console.log('Ingesta OK:', res.data);
+        return res.data;
+    } catch (error) {
+        console.error('Error Ingesta:', error.response?.data?.mensaje || error.response?.data?.detail || error.message);
+    }
+}
+</code></pre>
+<h3>Paso 2: Espera Activa / Polling (<code>/verifactu/pendientes</code>)</h3>
+<p>El sistema debe preguntar periódicamente al endpoint de pendientes. <strong>Importante</strong>: No consulte el estado genérico de la factura (<code>check_status</code>); el ciclo de vida correcto y libre de errores 500 exige buscar la factura en la cola de "Pendientes de ACK".</p>
+<ul>
+<li>Puede buscar las últimas procesadas (usando <code>n_ultimos</code>) o buscar <em>exactamente</em> la que acaba de enviar usando la <strong>Correlación</strong> matemática devuelta en la ingesta (<code>id_envio</code> y <code>linea_log_detalle</code>).</li>
+<li>El Backend devuelve la respuesta final de la AEAT (Huella, CSV, Status y UrlQR).</li>
+</ul>
+<pre><code class="language-javascript">async function getPendientesPorCorrelacion(nifEmisor, idEnvio, lineaDetalle) {
+    // Buscar la factura exacta acotando la búsqueda (alta eficiencia)
+    const url = `http://localhost:8000/verifactu/pendientes?nif_emisor=${nifEmisor}&amp;id_envio=${idEnvio}&amp;linea_log_detalle=${lineaDetalle}`;
+    const res = await axios.get(url, {
+        headers: { 'X-Verifactu-Emisor': nifEmisor }
+    });
+    return res.data; // Retorna un array plano con el resultado (si ya terminó)
+}
+</code></pre>
+<h3>Paso 3: Confirmación (<code>/verifactu/ack</code>)</h3>
+<p>Una vez que su sistema ha recuperado los datos finales (QR y Huella) desde la cola de pendientes:
+1.  Guárdelos en su base de datos local asociados a la factura.
+2.  Extraiga el campo <code>indice_log</code> <strong>directamente de la respuesta recibida en el Paso 2</strong> (Tabla pendientes).
+3.  Envíe el <strong>ACK</strong> al Backend inyectando exclusivamente ese <code>indice_log</code>.
+4.  El Backend marca esa operación como "Entregada" y la purga silenciosamente de la cola.</p>
+<pre><code class="language-javascript">async function sendAck(nifEmisor, indiceLogPendiente) {
+    const url = 'http://localhost:8000/verifactu/ack';
+    await axios.post(url, {
+        nif_emisor: nifEmisor,
+        indice_log: parseInt(indiceLogPendiente) // &lt;- Dato sacado de /pendientes
+    }, {
+        headers: {
+            'X-API-Key': process.env.VERIFACTU_API_KEY,
+            'X-Verifactu-Emisor': nifEmisor
+        }
+    });
+    console.log(`ACK automático enviado para ID Real ${indiceLogPendiente}`);
+}
+</code></pre>
+<hr />
+<h2>4. Configuración y Autenticación (API Key)</h2>
+<p>Para garantizar la seguridad y homogeneidad en toda la arquitectura VeriFactu, el cliente Node.js implementa <strong>el mismo sistema de archivo de inicialización (<code>config.ini</code>) que el cliente PHP y Delphi</strong>.</p>
+<h3>4.1. Archivo <code>config.ini</code></h3>
+<p>Su proxy Node.js (<code>server.js</code>) buscará y analizará automáticamente el archivo <code>config.ini</code> que acompañe al ejecutable. No necesita librerías externas para procesarlo.</p>
+<pre><code class="language-ini">[api]
+; URL del Micro Server
+base_url = &quot;http://127.0.0.1:8000&quot;
+
+; API Key global del servidor
+token = &quot;tu_api_key_secreta&quot;
+
+; Verificar certificado SSL (true/false) en llamadas HTTPS locales
+ssl_verify = true
+
+[demo]
+; NIF del emisor asignado a tu Tenant
+nif_emisor = &quot;05616281A&quot;
+</code></pre>
+<blockquote>
+<p><strong>Avenida Alternativa (Zero-File)</strong>: Si lo despliega en la Nube (AWS, Heroku, Docker), el proxy también respeta las variables de entorno nativas (<code>VERIFACTU_API_KEY</code> y <code>VERIFACTU_NIF</code>), dándoles prioridad o actuando como fallback si el <code>config.ini</code> no existe.</p>
+</blockquote>
+<h3>4.2. Autenticación y Seguridad Multi-Tenant (RBAC)</h3>
+<p>Si la opción <code>require_auth=True</code> está activada en el backend, la API HTTP de Micro Server exigirá dos elementos de seguridad obligatorios enviados a través de su cliente HTTP (Axios/Fetch):</p>
+<ol>
+<li><strong><code>X-API-Key</code> (Token)</strong>: Identifica a la aplicación servidora o sistema ERP (su servidor Node).</li>
+<li><strong><code>X-Verifactu-Emisor</code> (NIF)</strong>: Declara el NIF de la empresa sobre la que se va a operar. El servidor comprueba si la <em>API Key</em> facilitada tiene permisos concedidos sobre este NIF.</li>
+</ol>
+<p><strong>Prevención de Suplantación en Ingesta:</strong>
+Durante una operación de Ingesta, el servidor comprueba que el campo <code>cabecera.emisor</code> coincida exactamente con el NIF por el que Node.js se ha autenticado en las cabeceras REST. Si el backend rechaza la petición, Node o Express devolverán un <code>HTTP 403 Forbidden</code> (o 401) junto con un JSON con el mensaje detallado de seguridad (<code>{"detail": "El usuario no tiene permisos sobre el NIF..."}</code>).</p>
+<hr />
+<h2>5. Visualización de QR en Node.js (Web Server)</h2>
+<p>Si su aplicación Node.js sirve frontend (HTML/EJS/Pug/React), el campo <code>url_qr_verifactu</code> es una URL pública que puede incrustar directamente para los clientes finales.</p>
+<pre><code class="language-html">&lt;!-- En su plantilla HTML o respuesta API --&gt;
+&lt;a href=&quot;${item.url_qr_verifactu}&quot; target=&quot;_blank&quot;&gt;Ver QR&lt;/a&gt;
+</code></pre>
+<hr />
+<h2>6. Solución de Problemas (Troubleshooting)</h2>
+<h3>Error de Conexión (ECONNREFUSED)</h3>
+<ul>
+<li><strong>Causa</strong>: El Micro Server no está corriendo en el puerto 8000.</li>
+<li><strong>Solución</strong>: Verifique que el servicio Python/Exe está activo.</li>
+</ul>
+<h3>Timeout en "Pendientes"</h3>
+<ul>
+<li><strong>Causa</strong>: La AEAT tarda en responder o hay mucha carga.</li>
+<li><strong>Solución</strong>: El sistema es asíncrono. No reenvíe la factura. Simplemente siga consultando <code>getPendientes</code> más tarde usando <code>setInterval</code> o Cron.</li>
+</ul>
+<h3>HTTP 422 - Regla de Negocio</h3>
+<ul>
+<li><strong>Causa</strong>: El JSON viola alguna regla de la AEAT (fechas futuras, sumas incorrectas).</li>
+<li><strong>Solución</strong>: El cliente HTTP (Axios/Node-fetch) levantará un error o rechazará la Promesa. Capture el error y lea <code>error.response.data.mensaje</code> o <code>error.response.data.detail</code>.</li>
+</ul>
+<hr />
+<h2>7. Casos de Uso Avanzados</h2>
+<h3>7.1. Ingesta Asíncrona (Fire &amp; Forget)</h3>
+<p>Ideal para APIs de alto rendimiento donde no se quiere bloquear la respuesta al usuario final (Ej. Middleware Node.js para apps móviles).</p>
+<p><strong>Reglas de Negocio:</strong>
+*   <strong>Antelación</strong>: El backend custodia facturas con fecha futura.
+*   <strong>Sobreescritura</strong>: Nueva versión (Pre-AEAT) reemplaza a la anterior (corrección en caliente).</p>
+<pre><code class="language-javascript">// Pseudocódigo Express.js
+app.post('/emitir-factura', async (req, res) =&gt; {
+    try {
+        const url = `${MICRO_SERVER_URL}/v1/ingesta`;
+        const nifEmisor = req.body.cabecera.emisor;
+
+        const backendRes = await axios.post(url, req.body, { 
+             headers: { 
+                 'X-API-Key': process.env.VERIFACTU_API_KEY,
+                 'X-Verifactu-Emisor': nifEmisor
+             }
+        });
+
+        res.json({ success: true, trackingId: backendRes.data });
+    } catch (e) {
+        res.status(e.response?.status || 500).json({ 
+             success: false, 
+             error: e.response?.data?.detail || e.message 
+        });
+    }
+});
+</code></pre>
+<h3>7.2. Worker de Sincronización (Cron Job)</h3>
+<p>Un script separado que corre cada minuto para recoger resultados y actualizar su BD.</p>
+<pre><code class="language-javascript">// cron-sync.js
+async function requestUpdates() {
+    try {
+        const pendientes = await getPendientes(&quot;B12345678&quot;);
+
+        if (pendientes?.items?.length &gt; 0) {
+            for (const item of pendientes.items) {
+                // Guardar Huella y QR en su BD local
+                await db.save(item.huella, item.url_qr_verifactu);
+
+                // Anunciar ACK
+                await sendAck(&quot;B12345678&quot;, item.indice_log);
+            }
+        }
+    } catch (err) {
+        console.error(&quot;Fallo al sincronizar CRON: &quot; + err.message);
+    }
+}
+
+// Ejecutar cada minuto
+setInterval(requestUpdates, 60000);
+</code></pre>

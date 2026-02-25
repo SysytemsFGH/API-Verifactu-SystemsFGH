@@ -1,0 +1,10 @@
+{
+    "01_vision_general.md": "1. Visión General del Middleware",
+    "02_arquitectura_despliegue.md": "2. Arquitectura de Despliegue y API",
+    "03_conceptos_flujo.md": "3. Conceptos Clave y Flujo de Trabajo",
+    "04_entorno_simulacion.md": "4. Simulador y Entorno de Pruebas",
+    "05_integracion_api.md": "5. Guía de Integración API Rest",
+    "06_diccionario_datos.md": "6. Diccionario de Datos (API y BD)",
+    "07_rutas_y_estructuras_json.md": "7. Rutas API y Estructuras JSON",
+    "08_monitorizacion_logs.md": "8. Monitorización, Auditoría y Logs"
+}

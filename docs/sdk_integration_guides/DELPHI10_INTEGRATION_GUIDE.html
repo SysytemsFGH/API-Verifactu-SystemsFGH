@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Integración VeriFactu para Delphi 10</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #2980b9;
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        h3 {
+            color: #16a085;
+            margin-top: 25px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        ul,
+        ol {
+            margin-bottom: 15px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        code {
+            font-family: Consolas, "Courier New", monospace;
+            background-color: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #c7254e;
+        }
+
+        pre {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 0;
+            padding: 10px 20px;
+            background-color: #eef9fd;
+            color: #555;
+        }
+
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 10px 20px;
+            margin-bottom: 15px;
+        }
+
+        hr {
+            border: 0;
+            height: 1px;
+            background: #ddd;
+            margin: 40px 0;
+        }
+    </style>
+</head>
+<body>
+<h1>Guía de Integración VeriFactu para Delphi 10 (Seattle/Tokyo/Rio/Athens)</h1>
+<blockquote>
+<p><strong>Resumen</strong>: Esta guía documenta la arquitectura técnica del adaptador "Micro Server" para entornos Delphi modernos (D10 en adelante). Permite cumplir con la normativa VeriFactu delegando la criptografía y comunicación compleja a un Backend intermedio.</p>
+</blockquote>
+<hr />
+<h2>1. Arquitectura del Motor (Engine D10)</h2>
+<p>El motor ha sido diseñado bajo la filosofía <strong>"Lightweight Integration"</strong> para facilitar su uso sin necesidad de instalar pesadas suites de componentes en el IDE.</p>
+<h3>Componentes Principales</h3>
+<p>El núcleo se encuentra en la carpeta <code>src/vfengine</code> y consta de tres unidades esenciales:</p>
+<ol>
+<li>
+<p><strong><code>uHttpVF.pas</code> (Capa de Transporte con ICS)</strong></p>
+<ul>
+<li><strong>Tecnología</strong>: Utiliza <strong>ICS (Internet Component Suite)</strong> de Overbyte, específicamente la unidad <code>OverbyteIcsHttpProt</code>.</li>
+<li><strong>Sin Instalación</strong>: A diferencia de la forma tradicional, <strong>NO es necesario instalar los paquetes de componentes de ICS en el IDE</strong>.<ul>
+<li>Basta con descargar <strong>ICS V9.2</strong> (o superior).</li>
+<li>Descomprimir y añadir la carpeta <code>Source</code> al <strong>Library Path</strong> de Delphi.</li>
+<li>El motor instancia las clases <code>THttpCli</code> y <code>TSslHttpCli</code> dinámicamente en tiempo de ejecución.</li>
+</ul>
+</li>
+<li><strong>Ventajas</strong>: Soporte robusto para <strong>TLS 1.2 / 1.3</strong> moderno (algo que Indy suele complicar) y manejo nativo de UTF-8.</li>
+</ul>
+</li>
+<li>
+<p><strong><code>uVFEngine.pas</code> (Capa de Negocio y JSON)</strong></p>
+<ul>
+<li><strong>JSON Nativo</strong>: Utiliza la librería estándar <code>System.JSON</code> (disponible desde Delphi 2010), garantizando rendimiento y compatibilidad sin librerías de terceros.</li>
+<li><strong>Orquestación</strong>: Maneja la <strong>Máquina de Estados</strong> implícita de la normativa:<ol>
+<li><strong>INGESTA</strong>: Envío del JSON al Backend.</li>
+<li><strong>POLLING</strong>: Consulta de la cola de "Pendientes" (facturas ya procesadas por el worker y enviadas a la AEAT) esperando la confirmación (ACK) del ERP.</li>
+<li><strong>ACK</strong>: Confirmación de recepción por parte del ERP (borrado de la cola) tras guardar Huella y QR.</li>
+</ol>
+</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h2>2. Garantía de Compatibilidad API (D7 vs D10)</h2>
+<p>Entendemos el riesgo que conlleva cambiar de librerías base (de WinInet a ICS). Por ello, hemos diseñado las unidades <code>uVFEngine</code> y <code>uHttpVF</code> manteniendo <strong>estrictamente la misma interfaz pública</strong> en ambas versiones.</p>
+<h3>¿Qué significa esto?</h3>
+<p>Significa que <strong>los métodos que usted llama desde sus formularios NO cambian</strong>:
+*   <code>Engine.IngestaFromJson(...)</code> tiene la misma firma.
+*   <code>Engine.GetPendientes(...)</code> acepta los mismos parámetros opcionales.
+*   <code>Engine.IngestaYConfirmacion(...)</code> mantiene el mismo orden de argumentos y valores por defecto.</p>
+<p>Puede copiar la lógica de negocio de su aplicación D7 y pegarla en D10 con la tranquilidad de que el compilador resolverá las llamadas correctamente, mientras que "por debajo" el motor aprovechará las mejoras de rendimiento y seguridad de ICS y System.JSON sin que usted tenga que reescribir su código de integración.</p>
+<hr />
+<h2>3. Configuración del JSON (Altas, Subsanaciones y Anulaciones)</h2>
+<p>No encontrará aquí una documentación exhaustiva sobre cómo construir el JSON manual. <strong>¡No es necesario!</strong></p>
+<p>El <strong>Panel de Administración Web</strong> del Micro Server (sección <strong>Envíos</strong>) incluye una herramienta de <strong>Generación de Payloads</strong> interactiva:
+1.  Seleccione el tipo de operación.
+2.  Rellene los datos en el formulario.
+3.  Obtenga el JSON perfectamente validado y listo para copiar a su código Delphi.</p>
+<blockquote>
+<p><strong>Nota sobre <code>metadata</code></strong>: El esquema JSON exige un bloque <code>metadata</code> en la raíz. Aunque el backend actual ignore su contenido, <strong>debe estar presente</strong> (puede ir vacío).</p>
+</blockquote>
+<hr />
+<h2>3. Flujo de Trabajo Típico: "Alta de Factura"</h2>
+<p>El Backend actúa como un buffer inteligente. Su aplicación D10 habla con este Micro Server, no con la AEAT directamente.</p>
+<h3>Paso 1: Ingesta (<code>IngestaFromJson</code>)</h3>
+<p>Su ERP envía el JSON al endpoint <code>/v1/ingesta</code>.
+*   <strong>Respuesta</strong>: El Backend valida y guarda. Retorna <code>200 OK</code>.
+*   <strong>Estado</strong>: La factura <strong>AÚN NO</strong> ha ido a la AEAT. Un "Worker" en background se encarga de firmarla, encadenarla y enviarla.</p>
+<h3>Paso 2: Espera Activa (<code>GetPendientes</code>)</h3>
+<p>El ERP pregunta periódicamente ("Polling") a <code>/verifactu/pendientes</code>.
+*   Cuando el worker termina, la factura aparece en esta lista con su <strong>Huella</strong>, <strong>CSV</strong> y <strong>UrlQR</strong>.
+*   <strong>Correlación</strong>: El motor busca automáticamente la factura usando <code>IdEnvio</code> y <code>LineaDetalle</code>.</p>
+<h3>Paso 3: Confirmación (<code>AckIndice</code>)</h3>
+<p>Una vez recuperados los datos (Huella/QR):
+1.  El ERP los guarda en su BD local.
+2.  Envía un <strong>ACK</strong> al Backend (<code>/verifactu/ack</code>).
+3.  El Backend marca la operación como "Entregada" y la saca de la cola.</p>
+<p><strong>Función "Todo en Uno"</strong>:
+La unidad <code>uVFEngine</code> incluye <code>IngestaYConfirmacion(...)</code> que automatiza estos 3 pasos en una sola llamada bloqueante (con timeout).</p>
+<hr />
+<h2>4. Configuración (<code>config.ini</code>) y Autenticación (API Key)</h2>
+<p>El motor busca el archivo <code>config.ini</code> junto al ejecutable:</p>
+<pre class="codehilite"><code class="language-ini">[api]
+; URL del VeriFactu Micro Server
+base_url=http://localhost:8000
+; Tiempo máximo (ms)
+timeout_ms=60000
+; Token de seguridad (API Key). Si el backend exige autenticación, este campo es OBLIGATORIO.
+token=mi_clave_api_secreta_123
+
+[demo]
+; NIF del emisor asociado a esta instancia. El API Key debe tener permisos sobre este NIF.
+nif_emisor=B12345678
+n_ultimos=50
+</code></pre>
+
+<h3>4.1. Autenticación y Seguridad Multi-Tenant (RBAC)</h3>
+<p>El Micro Server VeriFactu incluye un sistema de seguridad avanzado para entornos donde un mismo backend atiende a múltiples empresas (Multi-Tenant).</p>
+<p>Si la opción <code>require_auth=True</code> está activada en el backend, la API exigirá dos elementos de seguridad obligatorios:</p>
+<ol>
+<li><strong><code>X-API-Key</code> (Token)</strong>: Identifica al usuario o integración ERP. Se genera desde la <em>Gestión de Usuarios</em> en el Panel de Administración Web.</li>
+<li><strong><code>X-Verifactu-Emisor</code> (NIF)</strong>: Declara el NIF sobre el que se va a operar. El servidor comprueba si la <em>API Key</em> facilitada tiene permisos concedidos explícitamente sobre este NIF.</li>
+</ol>
+<p><strong>Prevención de Suplantación en la Ingesta:</strong>
+Como medida de máxima seguridad, durante una operación de Ingesta, el servidor abre el JSON enviado y verifica que el campo <code>cabecera.emisor</code> coincida exactamente con el NIF para el que el usuario se ha autenticado. Si un usuario intenta enviar (o modificar) una factura camuflando un NIF ajeno en el JSON, la operación se abortará inmediatamente devolviendo un error de seguridad <code>HTTP 403 Forbidden</code>. Lo mismo ocurrirá si intenta consultar facturas pendientes de otro emisor.</p>
+<h4>Implementación Automática en componentes</h4>
+<p>El motor Delphi se encarga automáticamente de inyectar las cabeceras HTTP de seguridad (<code>X-API-Key</code> y <code>X-Verifactu-Emisor</code>) de forma invisible suministrando la configuración en cada envío:</p>
+<pre class="codehilite"><code class="language-pascal">  // Configurado automáticamente a través del record:
+  Cfg.Token := 'mi_clave_api_secreta_123'; // Inyecta la cabecera X-API-Key
+  Cfg.NifEmisor := 'B12345678';            // Inyecta la cabecera X-Verifactu-Emisor
+
+  Engine := TVFEngine.Create(Cfg);
+</code></pre>
+
+<ul>
+<li><strong>Sin API Key (<code>token</code> vacío):</strong> El motor Delphi intentará realizar las llamadas sin cabeceras. Si el servidor tiene la seguridad activada, rechazará la petición sin avisar al ERP por debajo o mostrará una ventana con el HTTP Status <code>401 Unauthorized</code>.</li>
+<li><strong>Seguridad Emisor:</strong> El motor considerará los códigos devueltos por seguridad (403, 400) como fallos definidos y propagará ordenadamente el mensaje real al ERP sin entrar en bucles de reintento.</li>
+</ul>
+<hr />
+<h2>5. Visualización de QR en Delphi 10</h2>
+<p>Utilizamos soporte nativo para <strong>PNG</strong> y <strong>JPEG</strong> (<code>Vcl.Imaging</code>).
+El motor ofrece dos opciones en <code>TVFPendienteItem</code>:</p>
+<ol>
+<li><strong><code>QrVerifactu</code> (Base64)</strong>: La imagen real del QR en Base64.</li>
+<li><strong><code>UrlQrVerifactu</code> (URL)</strong>: Enlace público a la sede de la AEAT.</li>
+</ol>
+<p>La demo incluye <code>TryLoadBase64ToImage</code>, que decodifica el Base64 directamente a un <code>TImage</code> en memoria, siendo más eficiente que descargar el archivo temporalmente.</p>
+<hr />
+<h2>6. Solución de Problemas</h2>
+<h3>Error de Compilación "File not found: OverbyteIcs..."</h3>
+<ul>
+<li><strong>Causa</strong>: Falta la ruta de ICS en el Library Path.</li>
+<li><strong>Solución</strong>: Añadir <code>...\ICS\Source</code> en <em>Tools &gt; Options &gt; Language &gt; Delphi &gt; Library</em>.</li>
+</ul>
+<h3>Excepciones SSL / "Protocol not supported"</h3>
+<ul>
+<li><strong>Causa</strong>: Faltan las DLLs de OpenSSL o son incompatibles.</li>
+<li><strong>Solución</strong>: Asegúrese de tener <code>libeay32.dll</code> y <code>ssleay32.dll</code> (versión compatible con su ICS, usualmente 1.1.1 o 3.0) junto al ejecutable.</li>
+</ul>
+<h3>Timeout en "Pendientes"</h3>
+<ul>
+<li><strong>Causa</strong>: La AEAT tarda en responder o el worker está saturado.</li>
+<li><strong>Solución</strong>: Aumentar <code>timeout_ms</code>. El sistema es asíncrono; la factura no se pierde, intente recuperarla más tarde.</li>
+</ul>
+<hr />
+<h2>7. Ejemplo de Integración: Alta Síncrona (Todo en Uno)</h2>
+<p>Este enfoque implementa un ciclo completo e inmediato para una sola operación. La función IngestaYConfirmacion realiza internamente todo el trabajo sucio: envía el JSON, espera haciendo polling activo a que la AEAT responda, y retorna solo cuando tiene el resultado final (o agota el tiempo de espera).</p>
+<p><strong>Pros:</strong>
+* <strong>Simplicidad</strong>: El código del ERP es lineal y fácil de entender.
+* <strong>Inmediatez</strong>: El cliente obtiene su factura impresa con el QR al momento (si la AEAT responde rápido).
+* <strong>Certeza</strong>: Sabes si la factura fue aceptada o rechazada en el mismo hilo de ejecución.</p>
+<p><strong>Contras:</strong>
+* <strong>Latencia</strong>: La interfaz de usuario puede quedarse "congelada" unos segundos mientras espera a la AEAT (se recomienda usar un thread o mostrar un "Espere...").
+* <strong>Dependencia Externa</strong>: Si la AEAT está lenta, la experiencia de usuario se degrada.</p>
+<pre class="codehilite"><code class="language-pascal">uses uVFEngine;
+
+procedure TForm1.EmitirAltaSincrona;
+var
+  Cfg: TVfDemoConfig;
+  Engine: TVFEngine;
+  Res: TVFIngestaAckResult;
+  MiJson: string;
+begin
+  // 1. Configurar
+  Cfg.ApiBaseUrl := 'http://localhost:8000';
+  Cfg.TimeoutMs := 60000; // 60s máximo
+  // ... resto de config
+
+  Engine := TVFEngine.Create(Cfg);
+  try
+    MiJson := MemoJson.Text; // JSON generado
+
+    // 2. Ejecutar Ciclo (Ingesta -&gt; Polling -&gt; ACK)
+    // El parámetro True final activa el ACK automático si se encuentra éxito
+    Res := Engine.IngestaYConfirmacion(MiJson, Cfg.TimeoutMs, 200, 50, True);
+
+    if Res.Timeout then
+      ShowMessage('Factura enviada, pero la AEAT tarda. Consulte Pendientes más tarde.')
+
+    else if Res.EncontradoEnPendientes and Res.AckHecho then
+    begin
+      // 3. Éxito: Guardar y Mostrar
+      // Res.Pendiente tiene todos los datos: Huella, QR, CSV, etc.
+      GuardarEnBD(Res.Pendiente.Huella, Res.Pendiente.UrlQrVerifactu);
+
+      // Mostrar QR
+      if Res.Pendiente.QrVerifactu &lt;&gt; '' then
+        CargarBase64EnImage(Res.Pendiente.QrVerifactu, MyImageComponent);
+
+      ShowMessage('Factura Aceptada. Huella: ' + Res.Pendiente.Huella);
+    end
+    else
+      ShowMessage('Error: ' + Res.ErrorMsg);
+
+  finally
+    Engine.Free;
+  end;
+end;
+</code></pre>
+
+<hr />
+<h2>8. Casos de Uso Avanzados</h2>
+<h3>8.1. Ingesta Asíncrona (Solo Envío)</h3>
+<p>Si su ERP prefiere no esperar la respuesta de la AEAT (bloqueante) y prefiere procesar las confirmaciones en un proceso batch separado.</p>
+<p>Reglas de Negocio Importantes:</p>
+<p>Antelación: Las facturas pueden enviarse con fecha anterior a su emisión oficial; el backend las guardará en espera hasta que corresponda procesarlas.
+Modificación (Pre-AEAT): Si envía una factura (mismo ID) y <strong>aún no ha sido procesada por la AEAT</strong>, esta nueva versión sobrescribe a la anterior. La "vigente" será siempre la última recibida antes del envío.
+Subsanación (Post-AEAT): Si envía una factura que <strong>YA fue procesada</strong> anteriormente:
+Se intenta enviar como una subsanación según la configuración en el backend y se procesará como tal.
+De lo contrario, la AEAT devolverá el error correspondiente solicitando rectificativa.
+Validaciones Inmediatas: La ingesta puede devolver errores (HTTP 4xx/5xx o mensaje de error en JSON) si detecta:
+Errores de estructura del JSON.
+Incoherencias en su composición (datos faltantes o tipos erróneos).
+Incongruencia en los cálculos (bases, cuotas y totales no coinciden).</p>
+<pre class="codehilite"><code class="language-pascal">procedure TForm1.EnviarFacturaAsync;
+var
+  IngestaResp: TVFIngestaResponse;
+begin
+  // Solo enviamos al Backend. Reciben OK (guardado) y nos vamos.
+  IngestaResp := Engine.IngestaFromJson(MiJson);
+
+  if IngestaResp.Ok then
+    ShowMessage('Factura encolada correctamente. ID Op: ' + IngestaResp.Id)
+  else
+    ShowMessage('Error al encolar: ' + IngestaResp.ErrorMsg);
+end;
+</code></pre>
+
+<h3>8.2. Recuperación de Pendientes (Polling de Confirmaciones)</h3>
+<p>Para un proceso en segundo plano (Timer) que recupera facturas ya procesadas por la AEAT.</p>
+<ol>
+<li>Llamar a <code>GetPendientes</code> (últimas N).</li>
+<li>Iterar lista.Si tiene resultado final, guardar y hacer ACK.</li>
+</ol>
+<pre class="codehilite"><code class="language-pascal">procedure TForm1.ProcesarColaPendientes;
+var
+  Pend: TVFPendientesResponse;
+  Ack: TVFAckResponse;
+  I: Integer;
+  Item: TVFPendienteItem;
+begin
+  // Recuperar las ultimas 50
+  Pend := Engine.GetPendientes(50);
+
+  if not Pend.Ok then Exit; 
+
+  for I := 0 to Length(Pend.Items) - 1 do
+  begin
+    Item := Pend.Items[I];
+
+    // Status 0..3: Respuestas Finales de la AEAT
+    // 0: Aceptada, 1: Aceptada con Errores
+    // 2: Rechazada, 3: Rechazada (Otro)
+    if (Item.Status &gt;= 0) and (Item.Status &lt;= 3) then
+    begin
+       try
+          // A. Procesar respuesta en el ERP local
+          // MiBD.Actualizar(Item.IdEnvio, Item.Status, Item.Huella, ...);
+
+          // B. Confirmar recepción al Backend (ACK)
+          // Esto la borra de la lista de pendientes del backend
+          Ack := Engine.AckIndice(Item.IndiceLog);
+
+          if not Ack.Ok then
+            Log('Error al hacer ACK: ' + Ack.ErrorMsg);
+
+       except
+          // Si falla mi BD local, NO hago ACK para que vuelva a salir en el siguiente polling
+          Log('Error guardando en BD local, reintentaremos luego.');
+       end;
+    end;
+  end;
+end;
+</code></pre>
+</body>
+</html>

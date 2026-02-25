@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Integración VeriFactu para PHP</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #2980b9;
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        h3 {
+            color: #16a085;
+            margin-top: 25px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        ul,
+        ol {
+            margin-bottom: 15px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        code {
+            font-family: Consolas, "Courier New", monospace;
+            background-color: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #c7254e;
+        }
+
+        pre {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 0;
+            padding: 10px 20px;
+            background-color: #eef9fd;
+            color: #555;
+        }
+
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 10px 20px;
+            margin-bottom: 15px;
+        }
+
+        hr {
+            border: 0;
+            height: 1px;
+            background: #ddd;
+            margin: 40px 0;
+        }
+    </style>
+</head>
+<body>
+<h1>Guía de Integración VeriFactu para PHP (Completa)</h1>
+<blockquote>
+<p><strong>Resumen</strong>: Esta guía documenta la integración técnica del adaptador "Micro Server" en entornos PHP (Web y CLI). Permite delegar la complejidad criptográfica y de comunicación con la AEAT a un backend intermedio, diseñado para cumplir con la normativa VeriFactu de forma robusta y sencilla.</p>
+</blockquote>
+<hr />
+<h2>1. Arquitectura del Motor (Engine PHP)</h2>
+<p>El motor ha sido diseñado bajo la filosofía <strong>"Drop-in"</strong>: un solo archivo <code>.php</code> sin dependencias de Composer ni frameworks externos, garantizando compatibilidad con hostings compartidos, CMS (WordPress, PrestaShop) y aplicaciones legacy.</p>
+<h3>Componentes Principales</h3>
+<p>El núcleo consta de dos archivos esenciales que deben copiarse a su proyecto:</p>
+<ol>
+<li>
+<p><strong><code>vf_engine.php</code> (El Motor)</strong></p>
+<ul>
+<li><strong>Transporte (cURL)</strong>: Utiliza la extensión nativa <code>php-curl</code>, presente en el 99% de los servidores PHP.</li>
+<li><strong>Robustez SSL/TLS</strong>: Implementa configuración configurable (<code>ssl_verify</code>) para manejar certificados en desarrollo local (WAMP/XAMPP) sin romper la seguridad en producción.</li>
+<li><strong>UTF-8</strong>: Gestiona automáticamente la codificación de caracteres para asegurar que ñ y tildes se transmitan correctamente en el JSON.</li>
+</ul>
+</li>
+<li>
+<p><strong><code>config.ini</code> (Configuración)</strong></p>
+<ul>
+<li>Separa las credenciales y URLs del código fuente usando <code>parse_ini_file</code>.</li>
+</ul>
+</li>
+</ol>
+<h3>1.1. Responsabilidad Criptográfica (Certificados AEAT vs HTTPS)</h3>
+<p>Es de vital importancia distinguir entre los certificados de la AEAT y la comunicación SSL de la API:</p>
+<ul>
+<li><strong>Firma de Facturas (Certificados AEAT)</strong>: Usted <strong>NO tiene ninguna responsabilidad</strong> ni debe realizar ninguna implementación en PHP. El Micro Server custodia los certificados fiscales de forma segura y se encarga de firmar los XML, encriptarlos y negociar la conexión segura MTLS directamente con Hacienda. Toda esta complejidad es 100% transparente para su aplicación.</li>
+<li><strong>Comunicación Segura (HTTPS / SSL Local)</strong>: El parámetro <code>ssl_verify</code> que verá en su archivo <code>config.ini</code> o a lo largo de este documento hace referencia <em>exclusivamente</em> a si el Micro Server está montado detrás de un dominio con HTTPS (ej. <code>https://api.mipropioerp.com</code>). En entornos de desarrollo local (WAMP/XAMPP), esta función permite ignorar errores de certificados generados por usted mismo para asegurar su API.</li>
+</ul>
+<h3>Máquina de Estados Implícita</h3>
+<p>El sistema gestiona el ciclo de vida de la factura en tres fases:
+1.  <strong>INGESTA</strong>: Envío del JSON de la factura al Backend. El backend la guarda inmediatamente (buffer).
+2.  <strong>POLLING</strong>: Consulta periódica de la cola de "Pendientes" (facturas ya procesadas por la AEAT) esperando confirmación.
+3.  <strong>ACK</strong>: Confirmación de recepción por parte del ERP/Web tras guardar la Huella y la URL del QR.</p>
+<hr />
+<h2>2. Configuración del JSON (Altas, Subsanaciones y Anulaciones)</h2>
+<p>No encontrará en esta guía una documentación exhaustiva sobre cómo construir el JSON campo a campo. <strong>¡No es necesario!</strong></p>
+<p>El <strong>Panel de Administración Web</strong> del Micro Server (sección <strong>Envíos</strong>) incluye una herramienta de <strong>Generación de Payloads</strong> interactiva diseñada específicamente para desarrolladores.</p>
+<h3>Flujo de Diseño Recomendado:</h3>
+<ol>
+<li>Acceda al Panel Web del Micro Server.</li>
+<li>Seleccione el tipo de operación (Alta, Anulación, Rectificativa...).</li>
+<li>Rellene los datos en el formulario visual.</li>
+<li>Copie el JSON generado y validado directamente a su código PHP.</li>
+</ol>
+<blockquote>
+<p><strong>Nota sobre <code>metadata</code></strong>: El esquema JSON exige un bloque <code>metadata</code> en la raíz. Aunque actualmente su contenido es ignorado, <strong>debe estar presente</strong> para pasar la validación del esquema.</p>
+</blockquote>
+<hr />
+<h2>3. Flujo de Trabajo Típico</h2>
+<p>El Backend actúa como un <strong>buffer inteligente</strong>. Su aplicación PHP no habla con la AEAT directamente; habla con este Micro Server.</p>
+<h3>Paso 1: Ingesta (<code>ingestaJson</code>)</h3>
+<p>Su aplicación genera un array o JSON con los datos de la factura y lo envía.</p>
+<ul>
+<li><strong>Respuesta Inmediata</strong>: El Backend valida la estructura básica y guarda la factura en su base de datos interna.</li>
+<li><strong>Buffer Asíncrono</strong>: La factura <strong>AÚN NO</strong> ha ido a la AEAT. Un "Worker" en segundo plano la tomará, firmará, encadenará y enviará.</li>
+<li><strong>Ventaja</strong>: Su script PHP no sufre <em>timeouts</em> esperando a la AEAT. La respuesta es sub-100ms.</li>
+</ul>
+<pre class="codehilite"><code class="language-php">$res = $vf-&gt;ingestaJson($datosFactura);
+if ($res['ok']) {
+    // Factura aceptada en el sistema. ID Tracking: $res['tracking']['cab_num_secuencia']
+}
+</code></pre>
+
+<h3>Paso 2: Espera Activa / Polling (<code>getPendientes</code>)</h3>
+<p>El ERP o un proceso Cron debe preguntar periódicamente al endpoint de pendientes.</p>
+<ul>
+<li>El Backend devuelve las facturas que la AEAT ya ha contestado.</li>
+<li>Incluye la <strong>Huella</strong>, el <strong>CSV</strong> (Código Seguro Verificación) y la <strong>UrlQR</strong>.</li>
+</ul>
+<pre class="codehilite"><code class="language-php">$res = $vf-&gt;getPendientes(&quot;B12345678&quot;, 50);
+</code></pre>
+
+<h3>Paso 3: Confirmación (<code>ackIndice</code>)</h3>
+<p>Una vez que su sistema ha recuperado los datos finales (QR y Huella):
+1.  Guárdelos en su base de datos local asociados a la factura.
+2.  Envíe un <strong>ACK</strong> al Backend indicando el <code>indice_log</code>.
+3.  El Backend marca esa operación como "Entregada" y la saca de la cola.</p>
+<hr />
+<h2>4. Reglas de Negocio Críticas</h2>
+<p>El sistema implementa lógica avanzada para manejar situaciones complejas:</p>
+<h3>1. Antelación (Envío Previo)</h3>
+<p>Las facturas pueden enviarse con fecha de emisión futura o anterior. El backend las custodiará hasta que sean procesadas.</p>
+<h3>2. Modificación (Pre-AEAT) - "Corregir antes de enviar"</h3>
+<p>Si envía una factura (mismo NIF, Serie y Número) y esta <strong>aún no ha sido procesada por la AEAT</strong> (sigue en cola interna):
+*   La nueva versión <strong>SOBRESCRIBE</strong> a la anterior.
+*   Esto permite corregir errores (ej: olvidar el IVA) si se detectan rápido, sin dejar rastro de la versión errónea en la AEAT.</p>
+<h3>3. Subsanación (Post-AEAT) - "Rectificar después de enviar"</h3>
+<p>Si envía una factura que <strong>YA fue procesada</strong> y aceptada por la AEAT:
+*   Si el sistema detecta cambios, intentará enviarla como una <strong>Subsanación</strong> (si la configuración lo permite).
+*   En caso contrario, la AEAT devolverá un error indicando que la factura ya existe, forzando a realizar una factura rectificativa (con nueva serie/número).</p>
+<h3>4. Validaciones Inmediatas</h3>
+<p>La ingesta devolverá error (HTTP 4xx/5xx) si detecta:
+*   Errores de sintaxis JSON.
+*   Incoherencias matemáticas graves (Total != Base + Cuota).
+*   Falta de campos obligatorios (NIF, Fecha, Totales).</p>
+<hr />
+<h2>5. Visualización de QR en PHP</h2>
+<p>A diferencia de entornos de escritorio, en PHP la visualización es trivial. El campo <code>url_qr_verifactu</code> devuelto en el Paso 2 es una URL pública de la AEAT.</p>
+<h3>En Sitio Web / HTML</h3>
+<p>Simplemente incruste la imagen generada por la AEAT (o use una librería JS como <code>qrcode.js</code>):</p>
+<pre class="codehilite"><code class="language-html">&lt;!-- Opción A: Enlace directo (La AEAT genera el PDF/Imagen) --&gt;
+&lt;a href=&quot;&lt;?php echo $item['url_qr_verifactu']; ?&gt;&quot; target=&quot;_blank&quot;&gt;Ver QR VeriFactu&lt;/a&gt;
+
+&lt;!-- Opción B: Generar QR en el navegador --&gt;
+&lt;div id=&quot;qrcode&quot;&gt;&lt;/div&gt;
+&lt;script&gt;
+    new QRCode(document.getElementById(&quot;qrcode&quot;), &quot;&lt;?php echo $item['url_qr_verifactu']; ?&gt;&quot;);
+&lt;/script&gt;
+</code></pre>
+
+<hr />
+<h2>6. Configuración (<code>config.ini</code>) y Autenticación (API Key)</h2>
+<p>Para garantizar la seguridad en un entorno Multi-Tenant, el Micro Server puede exigir una <strong>API Key</strong> (Token) para autorizar todas las peticiones y restringir el acceso a la información de los emisores (RBAC).</p>
+<p>El motor PHP se encarga automáticamente de inyectar las cabeceras HTTP de seguridad (<code>X-API-Key</code> y <code>X-Verifactu-Emisor</code>) si se configuran correctamente en su archivo <code>config.ini</code>:</p>
+<pre class="codehilite"><code class="language-ini">[api]
+; URL del VeriFactu Micro Server
+base_url=http://localhost:8000
+; Timeout para cURL
+timeout_sec=30
+; Token de seguridad (API Key). Si el backend exige autenticación (require_auth=true), este campo es OBLIGATORIO.
+token=mi_clave_api_secreta_123
+; Verificar SSL (false para desarrollo local inseguro, true para producción)
+ssl_verify=true
+
+[demo]
+; NIF del emisor asociado a esta instancia. El API Key debe tener permisos sobre este NIF.
+nif_emisor=B12345678
+</code></pre>
+
+<h3>6.1. Autenticación y Seguridad Multi-Tenant (RBAC)</h3>
+<p>Si la opción <code>require_auth=True</code> está activada en el backend, la API exigirá dos elementos de seguridad obligatorios que <code>vf_engine.php</code> envía por defecto:</p>
+<ol>
+<li><strong><code>X-API-Key</code> (Token)</strong>: Identifica al usuario o integración ERP.</li>
+<li><strong><code>X-Verifactu-Emisor</code> (NIF)</strong>: Declara el NIF sobre el que se va a operar. El servidor comprueba si la <em>API Key</em> facilitada tiene permisos concedidos explícitamente sobre este NIF.</li>
+</ol>
+<p><strong>Prevención de Suplantación en la Ingesta:</strong>
+Como medida de máxima seguridad, durante una operación de Ingesta, el servidor abre el JSON enviado y verifica que el campo <code>cabecera.emisor</code> coincida exactamente con el NIF para el que el usuario se ha autenticado. Si un usuario intenta enviar o consultar facturas camuflando un NIF ajeno, la operación se abortará inmediatamente devolviendo un error <code>HTTP 403 Forbidden</code>. Lo mismo ocurrirá si intenta consultar facturas pendientes de otro emisor.</p>
+<ul>
+<li><strong>Sin API Key (<code>token</code> vacío):</strong> El motor PHP intentará realizar las llamadas sin cabeceras. Si el servidor tiene la seguridad activada, rechazará la petición y devolverá en el array de respuesta un error <code>HTTP 401 Unauthorized</code>.</li>
+<li><strong>Extracción de Errores:</strong> El motor PHP extraerá y mostrará el detalle devuelto por seguridad (error 403, 401) dentro de la propiedad <code>mensaje</code> del array de respuesta, indicándole al desarrollador el fallo exacto ("El usuario no tiene permisos sobre el NIF...").</li>
+</ul>
+<h2>7. Solución de Problemas (Troubleshooting)</h2>
+<h3>Error cURL SSL (Certificado auto-firmado)</h3>
+<ul>
+<li><strong>Causa</strong>: Entorno local (WAMP/XAMPP) sin certificados CA actualizados.</li>
+<li><strong>Solución</strong>: Ponga <code>ssl_verify=false</code> en <code>config.ini</code> <strong>solo durante desarrollo</strong>.</li>
+</ul>
+<h3>Timeout en "Pendientes"</h3>
+<ul>
+<li><strong>Causa</strong>: La AEAT tarda en responder o hay mucha carga.</li>
+<li><strong>Solución</strong>: El sistema es asíncrono. No reenvíe la factura. Simplemente siga consultando <code>getPendientes</code> más tarde.</li>
+</ul>
+<h3>HTTP 422 - Regla de Negocio</h3>
+<ul>
+<li><strong>Causa</strong>: El JSON está bien formado, pero los datos violan una regla (fechas imposibles, NIF inválido, sumas incorrectas).</li>
+<li><strong>Solución</strong>: Revise el mensaje <code>mensaje</code> y el array <code>detalles</code> devuelto por el <code>vf_engine</code> para ver el campo exacto del error.</li>
+</ul>
+<hr />
+<h2>8. Métodos Auxiliares (Nuevos)</h2>
+<h3><code>checkStatus($nif, $serie, $num)</code></h3>
+<p>Consulta ligera para saber si una factura concreta ya se procesó, sin traer toda la lista de pendientes. Útil para interfaces "AJAX" que muestran el estado en tiempo real.</p>
+<h3><code>getEstadoFactura($nif, $num, $serie)</code></h3>
+<p>Devuelve la traza completa (logs) de una factura. Útil para depurar por qué una factura ha sido rechazada por la AEAT, mostrando el mensaje de error exacto devuelto por Hacienda.</p>
+</body>
+</html>
