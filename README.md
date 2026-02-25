@@ -37,10 +37,10 @@ El Middleware actúa como una caja negra que recibe tus facturas en formato gen�
 
 ```mermaid
 graph LR
-    A[Tu ERP / App] -->|1. Envía Factura JSON| B(Middleware VeriFactu)
+    A[Tu ERP o App] -->|1. Envía Factura JSON| B(Middleware VeriFactu)
     B -->|2. Firma y Valida| C{Motor Local}
     C -->|3. Comunicación Segura| D[(Agencia Tributaria)]
-    D -->|4. Respuesta (Aceptada/Error)| C
+    D -->|4. Respuesta: Aceptada o Error| C
     C -->|5. Retorna Estado Final| A
     
     style A fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px;
