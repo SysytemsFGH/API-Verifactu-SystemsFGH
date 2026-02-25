@@ -74,11 +74,11 @@ Toda la documentación está estructurada en la carpeta `docs/`:
 
 En la carpeta `docs/sdk_integration_guides/` encontrarás guías listas para ser utilizadas en tu entorno de desarrollo. Ejemplos de conexión para:
 
-*   <img src="https://img.shields.io/badge/-Node.js-339933?style=flat-square&logo=Node.js&logoColor=white" /> [**Guía de Integración Node.js** `(NODEJS_INTEGRATION_GUIDE.html)`](docs/sdk_integration_guides/NODEJS_INTEGRATION_GUIDE.html)
-*   <img src="https://img.shields.io/badge/-Python-3776AB?style=flat-square&logo=Python&logoColor=white" /> [**Guía de Integración Python** `(PYTHON_INTEGRATION_GUIDE.html)`](docs/sdk_integration_guides/PYTHON_INTEGRATION_GUIDE.html)
-*   <img src="https://img.shields.io/badge/-C%23-239120?style=flat-square&logo=c-sharp&logoColor=white" /> [**Guía de Integración C#** `(CSHARP_INTEGRATION_GUIDE.html)`](docs/sdk_integration_guides/CSHARP_INTEGRATION_GUIDE.html)
-*   <img src="https://img.shields.io/badge/-PHP-777BB4?style=flat-square&logo=PHP&logoColor=white" /> [**Guía de Integración PHP** `(PHP_INTEGRATION_GUIDE.html)`](docs/sdk_integration_guides/PHP_INTEGRATION_GUIDE.html)
-*   <img src="https://img.shields.io/badge/-Delphi-EE1F35?style=flat-square&logo=Delphi&logoColor=white" /> [**Guía Delphi 7** `(DELPHI7_INTEGRATION_GUIDE.html)`](docs/sdk_integration_guides/DELPHI7_INTEGRATION_GUIDE.html) • [**Guía Delphi 10+** `(DELPHI10...html)`](docs/sdk_integration_guides/DELPHI10_INTEGRATION_GUIDE.html)
+*   <img src="https://img.shields.io/badge/-Node.js-339933?style=flat-square&logo=Node.js&logoColor=white" /> [**Ver Guía de Integración Node.js en el navegador**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/NODEJS_INTEGRATION_GUIDE.html)
+*   <img src="https://img.shields.io/badge/-Python-3776AB?style=flat-square&logo=Python&logoColor=white" /> [**Ver Guía de Integración Python en el navegador**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/PYTHON_INTEGRATION_GUIDE.html)
+*   <img src="https://img.shields.io/badge/-C%23-239120?style=flat-square&logo=c-sharp&logoColor=white" /> [**Ver Guía de Integración C# en el navegador**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/CSHARP_INTEGRATION_GUIDE.html)
+*   <img src="https://img.shields.io/badge/-PHP-777BB4?style=flat-square&logo=PHP&logoColor=white" /> [**Ver Guía de Integración PHP en el navegador**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/PHP_INTEGRATION_GUIDE.html)
+*   <img src="https://img.shields.io/badge/-Delphi-EE1F35?style=flat-square&logo=Delphi&logoColor=white" /> [**Ver Guía Delphi 7**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/DELPHI7_INTEGRATION_GUIDE.html) • [**Ver Guía Delphi 10+**](http://htmlpreview.github.io/?https://github.com/SysytemsFGH/API-Verifactu-SystemsFGH/blob/main/docs/sdk_integration_guides/DELPHI10_INTEGRATION_GUIDE.html)
 
 ## 🚀 Empezar
 
